@@ -1,0 +1,102 @@
+
+
+Cancel
+
+Send
+ChatGPT said:
+Yes, you can absolutely extend this FastAPI project to support PDF → Word, PDF → Images, Word → HTML, PPT → PDF, etc.
+
+Here's a clear guide to help you extend this system.
+
+✅ Where to Make Changes
+🔧 1. Add a new utility function in utils.py
+This is where you put the logic for new conversions.
+
+For example, to convert PDF → Word, you can use libraries like:
+
+pdf2docx (Python)
+
+Or use subprocess with tools like LibreOffice
+
+python
+Copy
+Edit
+from pdf2docx import Converter
+
+def convert_pdf_to_word(pdf_path):
+    docx_filename = os.path.splitext(os.path.basename(pdf_path))[0] + ".docx"
+    docx_path = os.path.join(OUTPUT_DIR, docx_filename)
+    
+    cv = Converter(pdf_path)
+    cv.convert(docx_path)
+    cv.close()
+    return docx_path
+⚙️ 2. Create a new API route in main.py
+Add a new FastAPI endpoint like:
+
+python
+Copy
+Edit
+@app.post("/convert/pdf-to-word", response_model=ConversionResponse)
+async def convert_pdf_to_word_api(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    if not file.filename.endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only .pdf files are allowed.")
+    
+    try:
+        original_path = save_uploaded_file(file)
+        converted_path = convert_pdf_to_word(original_path)
+        
+        conversion = save_conversion(
+            db,
+            original_filename=file.filename,
+            original_path=original_path,
+            converted_path=converted_path,
+            conversion_type="pdf-to-word"
+        )
+        return conversion
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+🗃️ 3. No Change Needed in Database (models.py)
+The model already supports multiple formats:
+
+python
+Copy
+Edit
+conversion_type = Column(String)  # Just pass "pdf-to-word", "word-to-html", etc.
+🧾 4. Optional: Update schemas.py if you want to return more metadata
+For example, add file size, mime type, etc.
+
+🔄 New Conversion Ideas and Libraries
+Conversion Type	Library/Tool
+Word → HTML	python-docx + manual parsing or mammoth
+PDF → Word	pdf2docx
+PDF → Image (PNG)	pdf2image
+PPT → PDF	unoconv, LibreOffice
+Image → PDF	Pillow, img2pdf
+Excel → PDF	win32com, LibreOffice
+
+✅ Summary: Steps to Extend
+Step	File	Action
+Create conversion logic	utils.py	Write conversion function
+Add upload API	main.py	Add endpoint using the logic
+Save metadata	crud.py	Use existing save_conversion()
+No change needed	models.py	Already generic
+Optional metadata response	schemas.py	Add more fields to ConversionResponse
+
+Let me know what conversion you’d like to add next (e.g. PDF → PNG or Word → HTML), and I can provide the exact logic for that too.
+
+
+
+
+
+
+
+
+You said:
+
+
+Cancel
+
+Send
+ChatGPT said:
+Thanks for the context. You're running into this error:
