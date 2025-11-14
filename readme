@@ -1,0 +1,299 @@
+
+# 1) System prerequisites
+
+* Python 3.10+ (3.11 preferable)
+* Node 18+ (for React)
+* MySQL server (or any DB you configured)
+* LibreOffice (for docx/xlsx → pdf)
+* poppler (for `pdf2image`) if using PDF→image conversion
+* wkhtmltopdf if you use HTML→PDF
+* (Windows) add LibreOffice `soffice.exe` to PATH or note its path
+
+---
+
+# 2) Clone / place repositories
+
+Assume root folder `document-converter/` with two folders:
+
+```
+document-converter/
+  backend/      ← FastAPI
+  frontend/     ← React (Vite or CRA)
+```
+
+---
+
+# 3) Backend — create Python venv & install deps
+
+Open terminal in `backend/`:
+
+Linux / macOS:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+Windows (powershell):
+
+```powershell
+python -m venv .venv
+.venv\Scripts\Activate.ps1     # or .venv\Scripts\activate.bat for cmd
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+`requirements.txt` should include at least:
+
+```
+fastapi
+uvicorn[standard]
+python-multipart
+sqlalchemy
+pymysql
+python-docx        # optional
+pdf2image
+pillow
+wkhtmltopdf        # only for reference; wkhtmltopdf binary needed
+python-dotenv
+```
+
+---
+
+# 4) Database setup (MySQL) & configure `database.py` / .env
+
+Create a MySQL database (example `doc_converter`):
+
+```sql
+CREATE DATABASE doc_converter CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'converter'@'localhost' IDENTIFIED BY 'strong_password';
+GRANT ALL ON doc_converter.* TO 'converter'@'localhost';
+FLUSH PRIVILEGES;
+```
+
+In `database.py` or `.env` set `DATABASE_URL`:
+
+```py
+# database.py
+DATABASE_URL = "mysql+pymysql://converter:strong_password@127.0.0.1:3306/doc_converter"
+```
+
+Or use `.env`:
+
+```
+DATABASE_URL=mysql+pymysql://converter:strong_password@127.0.0.1:3306/doc_converter
+```
+
+and load with `python-dotenv` in `database.py`.
+
+Your `Base.metadata.create_all(bind=engine)` in `main.py` will create the tables when server starts.
+
+---
+
+# 5) Install native binaries
+
+* LibreOffice: download + install. Note path:
+
+  * Windows: `C:\Program Files\LibreOffice\program\soffice.exe`
+  * Linux: `soffice` is usually on PATH
+* poppler (for pdf2image):
+
+  * Windows: download a poppler zip, extract and add `bin/` to PATH
+  * macOS: `brew install poppler`
+  * Linux: `sudo apt install poppler-utils`
+* wkhtmltopdf:
+
+  * Install official binary and ensure `wkhtmltopdf` is on PATH
+  * On Windows, use full path in utils if not on PATH
+
+Confirm binaries:
+
+```bash
+# check LibreOffice
+"C:\Program Files\LibreOffice\program\soffice.exe" --version   # windows
+soffice --version                                              # linux/mac
+
+# check poppler
+pdftoppm -v
+
+# check wkhtmltopdf
+wkhtmltopdf --version
+```
+
+---
+
+# 6) Ensure static directories exist
+
+Your `main.py` already creates them, but verify:
+
+```
+backend/static/uploads
+backend/static/converted
+```
+
+If not:
+
+```bash
+mkdir -p backend/static/uploads backend/static/converted
+```
+
+---
+
+# 7) Verify utils paths
+
+Open `utils.py` and set native binary paths if needed:
+
+```py
+SOFFICE_PATH = r"C:\Program Files\LibreOffice\program\soffice.exe"  # Windows
+# or leave "soffice" for Linux/macOS if in PATH
+
+POPPLER_PATH = None  # pdf2image will auto-find pdftoppm; if not: provide path
+WKHTMLTOPDF_PATH = r"C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe"  # if needed
+```
+
+Examples in functions should use these variables.
+
+---
+
+# 8) Start the backend
+
+From `backend/`:
+
+```bash
+uvicorn main:app --reload --host 127.0.0.1 --port 8000
+```
+
+You should see:
+
+```
+INFO:     Started server process [xxxxx]
+INFO:     Application startup complete.
+```
+
+If you get DB errors, check DATABASE_URL and MySQL user/permissions.
+
+---
+
+# 9) Quick smoke-test with curl (or Postman)
+
+Test Word→PDF (using curl):
+
+```bash
+curl -v -F "file=@/path/to/Research1.docx" http://127.0.0.1:8000/convert/word-to-pdf --output research1.pdf
+```
+
+This should write the returned PDF into `research1.pdf`. If curl returns a PDF-like file and server logs `POST /convert/word-to-pdf 200 OK`, good.
+
+Test latest conversion metadata:
+
+```bash
+curl http://127.0.0.1:8000/conversion/latest
+```
+
+Should return JSON with `original_filename`, `converted_path`, `timestamp`.
+
+If `404`, check that `get_latest_conversion` exists in `crud.py` and endpoint is in `main.py`, then restart server.
+
+---
+
+# 10) Frontend (React) — start dev server
+
+Open a new terminal in `frontend/`:
+
+Install:
+
+```bash
+npm install
+npm install axios
+```
+
+Start:
+
+```bash
+npm run dev    # Vite
+# or
+npm start      # CRA
+```
+
+Open your app (Vite default `http://localhost:5173`). Use the upload UI, choose type (Word → PDF), click Convert & Download.
+
+---
+
+# 11) What you should see after a successful convert in the UI
+
+* Browser auto-downloads the PDF file (via blob download)
+* Server log: `POST /convert/word-to-pdf 200 OK`
+* Frontend calls `GET /conversion/latest` → shows metadata
+* DB table `file_conversions` should have a new row
+
+---
+
+# 12) Troubleshooting checklist
+
+* `500` from `/convert/...`:
+
+  * Look at server logs (stacktrace). Common causes:
+
+    * LibreOffice not found or returns error
+    * wkhtmltopdf / pdftoppm missing
+    * Permission errors writing to `static/converted`
+* `404` for `/conversion/latest`:
+
+  * Ensure route added to `main.py` and `crud.get_latest_conversion` present
+  * Restart server
+* PDF created in `static/uploads` not `static/converted`:
+
+  * Check `convert_*` function `--outdir` argument
+* `file not found` when downloading:
+
+  * Confirm `converted_path` stored in DB matches filesystem path
+  * Normalize slashes with `converted_path.replace("\\", "/")` when saving
+* `wkhtmltopdf` content errors:
+
+  * Use `--load-error-handling ignore` and `--enable-local-file-access` in command
+* `pdf2image` errors:
+
+  * Ensure `pdftoppm` (poppler) installed and on PATH
+  * If Windows, provide `poppler_path` in `convert_from_path(pdf_path, poppler_path=...)`
+
+---
+
+# 13) Optional: run everything in Docker Compose (quick summary)
+
+If you want to containerize later:
+
+* One service for `backend` (uvicorn + dependencies)
+* One for `frontend` (npm start)
+* A MySQL service
+* Mount static volumes for `uploads/converted` persistent storage
+
+Tell me if you want a `docker-compose.yml` template and I’ll generate it.
+
+---
+
+# 14) Final checklist (copy-paste)
+
+1. Install system binaries: LibreOffice, poppler, wkhtmltopdf.
+2. Configure `database.py` (DATABASE_URL).
+3. `cd backend`:
+
+   * create venv, `pip install -r requirements.txt`
+   * ensure utils points to correct binary paths
+   * `uvicorn main:app --reload`
+4. Test with curl or Postman:
+
+   * `POST /convert/word-to-pdf` (get PDF)
+   * `GET /conversion/latest` (get metadata)
+5. `cd frontend`:
+
+   * `npm install`, `npm run dev`
+   * Use UI to upload & verify auto-download and metadata display.
+
+
+* Give you a ready `requirements.txt` and exact `utils.py` snippets for all converters (LibreOffice/wkhtmltopdf/poppler config), or
+* Generate a `docker-compose.yml` for backend + frontend + mysql,
+* Or paste the full `main.py` and `crud.py` final files so you can copy them in.
+
+
